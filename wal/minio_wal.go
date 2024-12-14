@@ -147,6 +147,9 @@ func (w *S3WAL) LastRecord(ctx context.Context) (Record, error) {
 
 	var maxOffset uint64 = 0
 	for object := range objectCh {
+		if object.Err != nil {
+			return Record{}, fmt.Errorf("failed to list object: %w", object.Err)
+		}
 		key := object.Key
 		offset, err := w.getOffsetFromKey(key)
 		if err != nil {
