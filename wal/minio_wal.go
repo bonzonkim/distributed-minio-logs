@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"distributed-minio-logs/utils"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -11,16 +12,17 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/minio/minio-go/v7"
 )
 
 type S3WAL struct {
-	client		*s3.Client
+	client		*minio.Client
 	bucketName	string
 	prefix	    string
 	length	    uint64
 }
 
-func NewS3WAL(client *s3.Client, bucketName string, prefix string) *S3WAL {
+func NewS3WAL(client *minio.Client, bucketName string, prefix string) *S3WAL {
 	return &S3WAL{
 		client:		client,
 		bucketName: bucketName, 
@@ -76,34 +78,43 @@ func (w *S3WAL) Append(ctx context.Context, data []byte) (uint64, error) {
 		return 0, fmt.Errorf("Failed to prepare object body: %w", err)
 	}
 
-	input := &s3.PutObjectInput{
-		Bucket:			aws.String(w.bucketName),
-		Key:			aws.String(w.getObjectKey(nextOffset)),
-		Body:			bytes.NewReader(buf),
-		IfNoneMatch:	aws.String("*"),
+	//input := &s3.PutObjectInput{
+	//	Bucket:			aws.String(w.bucketName),
+	//	Key:			aws.String(w.getObjectKey(nextOffset)),
+	//	Body:			bytes.NewReader(buf),
+	//	IfNoneMatch:	aws.String("*"),
+	//}
+	//if _, err = w.client.PutObject(ctx, input); err != nil {
+	//	return 0, fmt.Errorf("Failed to put object to storage: %w", err)
+	//}
+
+	//(ctx context.Context, bucketName string, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions)
+	if _, err = w.client.PutObject(ctx, w.bucketName, w.getObjectKey(nextOffset), bytes.NewReader(buf), int64(w.length), minio.PutObjectOptions{
+		ContentType: "application/octet-stream", // Set a suitable content type
+	}); err != nil {
+		return 0, fmt.Errorf("failed to put object to storage: %w", err)
 	}
 
-	if _, err = w.client.PutObject(ctx, input); err != nil {
-		return 0, fmt.Errorf("Failed to put object to storage: %w", err)
-	}
 	w.length = nextOffset
 	return nextOffset, nil
 }
 
 func (w *S3WAL) Read(ctx context.Context, offset uint64) (Record, error) {
 	key := w.getObjectKey(offset)
-	input := &s3.GetObjectInput{
-		Bucket:	aws.String(w.bucketName),
-		Key:	aws.String(key),
-	}
+//	input := &s3.GetObjectInput{
+//		Bucket:	aws.String(w.bucketName),
+//		Key:	aws.String(key),
+//	}
 
-	result, err := w.client.GetObject(ctx, input)
+	//(ctx context.Context, bucketName string, objectName string, opts minio.GetObjectOptions)
+	result, err := w.client.GetObject(ctx, w.bucketName, key, minio.GetObjectOptions{})
 	if err != nil {
 		return Record{}, fmt.Errorf("Failed to get object from storage: %w", err)
 	}
-	defer result.Body.Close()
+	//defer result.Body.Close()
+	defer result.Close()
 
-	data, err := io.ReadAll(result.Body)
+	data, err := io.ReadAll(result)
 	if err != nil {
 		return Record{}, fmt.Errorf("failed to read object body: %w", err)
 	}
@@ -128,27 +139,21 @@ func (w *S3WAL) Read(ctx context.Context, offset uint64) (Record, error) {
 }
 
 func (w *S3WAL) LastRecord(ctx context.Context) (Record, error) {
-	input := &s3.ListObjectsV2Input{
-		Bucket:		aws.String(w.bucketName),
-		Prefix:		aws.String(w.prefix + "/"),
-	}
-	paginator := s3.NewListObjectsV2Paginator(w.client, input)
+	client := utils.CreateMinioClient()
+	objectCh := client.ListObjects(ctx, w.bucketName, minio.ListObjectsOptions{
+		Prefix:		w.prefix + "/",
+		Recursive:	true,
+	})
 
 	var maxOffset uint64 = 0
-	for paginator.HasMorePages() {
-		output, err := paginator.NextPage(ctx)
+	for object := range objectCh {
+		key := object.Key
+		offset, err := w.getOffsetFromKey(key)
 		if err != nil {
-			return Record{}, fmt.Errorf("Failed to list objects from storage: %w", err)
+			return Record{}, fmt.Errorf("failed to parse offset from key: %w", err)
 		}
-		for _, obj := range output.Contents {
-			key := *obj.Key
-			offset, err := w.getOffsetFromKey(key)
-			if err != nil {
-				return Record{}, fmt.Errorf("Failed to parse offset from key: %w", err)
-			}
-			if offset > maxOffset {
-				maxOffset = offset
-			}
+		if offset > maxOffset {
+			maxOffset = offset
 		}
 	}
 	if maxOffset == 0 {
@@ -156,4 +161,34 @@ func (w *S3WAL) LastRecord(ctx context.Context) (Record, error) {
 	}
 	w.length = maxOffset
 	return w.Read(ctx, maxOffset)
+
+
+
+	//input := &s3.ListObjectsV2Input{
+	//	Bucket:		aws.String(w.bucketName),
+	//	Prefix:		aws.String(w.prefix + "/"),
+	//}
+	//paginator := s3.NewListObjectsV2Paginator(w.client, input)
+	//for paginator.HasMorePages() {
+	//	output, err := paginator.NextPage(ctx)
+	//	if err != nil {
+	//		return Record{}, fmt.Errorf("Failed to list objects from storage: %w", err)
+	//	}
+	//	for _, obj := range output.Contents {
+	//		key := *obj.Key
+	//		offset, err := w.getOffsetFromKey(key)
+	//		if err != nil {
+	//			return Record{}, fmt.Errorf("Failed to parse offset from key: %w", err)
+	//		}
+	//		if offset > maxOffset {
+	//			maxOffset = offset
+	//		}
+	//	}
+	//}
+	//if maxOffset == 0 {
+	//	return Record{}, fmt.Errorf("WAL is empty")
+	//}
+	//w.length = maxOffset
+	//return w.Read(ctx, maxOffset)
+
 }

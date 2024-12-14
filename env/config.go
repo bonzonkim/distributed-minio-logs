@@ -25,7 +25,6 @@ func LoadKeys() *AccessKeys {
 		SecretAccessKey: os.Getenv("SECRETACCESSKEY"),
 	}
 	fmt.Println("Successfully Loaded Keys")
-	fmt.Println(Keys)
 
 	return Keys
 }
