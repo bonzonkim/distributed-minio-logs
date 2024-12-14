@@ -1,7 +1,6 @@
-package minio
+package wal
 
 import (
-	//"github.com/aws/aws-sdk-go-v2/aws"
 	"bytes"
 	"context"
 	"crypto/sha256"
