@@ -9,7 +9,7 @@ import (
 	"log"
 	"testing"
 
-	"github.com/minio/minio-go"
+	"github.com/minio/minio-go/v7"
 )
 
 
@@ -20,7 +20,10 @@ func generateRandomStr() string {
 }
 
 func emptyOutBucket(ctx context.Context, client *minio.Client, bucketname, prefix string) error {
-	objectCh := client.ListObjects(bucketname, prefix, true, nil)
+	objectCh := client.ListObjects(ctx, bucketname, minio.ListObjectsOptions{
+		Prefix:		prefix,
+		Recursive:	true,
+	})
 	
 	var objectsToDelete []minio.ObjectInfo
 	for object := range objectCh {
@@ -36,7 +39,7 @@ func emptyOutBucket(ctx context.Context, client *minio.Client, bucketname, prefi
 	}
 
 	for _, object := range objectsToDelete {
-		err := client.RemoveObject(bucketname, object.Key)
+		err := client.RemoveObject(ctx, bucketname, object.Key, minio.RemoveObjectOptions{})
 		if err != nil {
 			return fmt.Errorf("failed to delete object %s: %v", object.Key, err)
 		}
@@ -52,7 +55,7 @@ func getWAL(t *testing.T) (*S3WAL, func()) {
 	bucketName := "test-wal-bucket-" + generateRandomStr()
 	prefix := generateRandomStr()
 
-	if err := utils.CreateBucket(bucketName, client, context.Background()); err != nil {
+	if err := utils.CreateBucket(bucketName, client, context.Background(), "kr-standard", false); err != nil {
 		t.Fatal(err)
 	}
 	cleanup := func() {
