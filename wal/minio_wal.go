@@ -76,17 +76,6 @@ func (w *S3WAL) Append(ctx context.Context, data []byte) (uint64, error) {
 		return 0, fmt.Errorf("Failed to prepare object body: %w", err)
 	}
 
-	//input := &s3.PutObjectInput{
-	//	Bucket:			aws.String(w.bucketName),
-	//	Key:			aws.String(w.getObjectKey(nextOffset)),
-	//	Body:			bytes.NewReader(buf),
-	//	IfNoneMatch:	aws.String("*"),
-	//}
-	//if _, err = w.client.PutObject(ctx, input); err != nil {
-	//	return 0, fmt.Errorf("Failed to put object to storage: %w", err)
-	//}
-
-	//(ctx context.Context, bucketName string, objectName string, reader io.Reader, objectSize int64, opts minio.PutObjectOptions)
 	if _, err = w.client.PutObject(ctx, w.bucketName, w.getObjectKey(nextOffset), bytes.NewReader(buf), int64(w.length), minio.PutObjectOptions{
 		ContentType: "application/octet-stream", // Set a suitable content type
 	}); err != nil {
@@ -99,10 +88,6 @@ func (w *S3WAL) Append(ctx context.Context, data []byte) (uint64, error) {
 
 func (w *S3WAL) Read(ctx context.Context, offset uint64) (Record, error) {
 	key := w.getObjectKey(offset)
-//	input := &s3.GetObjectInput{
-//		Bucket:	aws.String(w.bucketName),
-//		Key:	aws.String(key),
-//	}
 
 	//(ctx context.Context, bucketName string, objectName string, opts minio.GetObjectOptions)
 	result, err := w.client.GetObject(ctx, w.bucketName, key, minio.GetObjectOptions{})
@@ -162,34 +147,4 @@ func (w *S3WAL) LastRecord(ctx context.Context) (Record, error) {
 	}
 	w.length = maxOffset
 	return w.Read(ctx, maxOffset)
-
-
-
-	//input := &s3.ListObjectsV2Input{
-	//	Bucket:		aws.String(w.bucketName),
-	//	Prefix:		aws.String(w.prefix + "/"),
-	//}
-	//paginator := s3.NewListObjectsV2Paginator(w.client, input)
-	//for paginator.HasMorePages() {
-	//	output, err := paginator.NextPage(ctx)
-	//	if err != nil {
-	//		return Record{}, fmt.Errorf("Failed to list objects from storage: %w", err)
-	//	}
-	//	for _, obj := range output.Contents {
-	//		key := *obj.Key
-	//		offset, err := w.getOffsetFromKey(key)
-	//		if err != nil {
-	//			return Record{}, fmt.Errorf("Failed to parse offset from key: %w", err)
-	//		}
-	//		if offset > maxOffset {
-	//			maxOffset = offset
-	//		}
-	//	}
-	//}
-	//if maxOffset == 0 {
-	//	return Record{}, fmt.Errorf("WAL is empty")
-	//}
-	//w.length = maxOffset
-	//return w.Read(ctx, maxOffset)
-
 }
